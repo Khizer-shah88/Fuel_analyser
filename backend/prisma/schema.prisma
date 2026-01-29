@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  role      String    @default("ADMIN")
+  createdAt DateTime  @default(now())
+  stations  Station[]
+}
+
+model Station {
+  id        String   @id @default(uuid())
+  name      String
+  location  String?
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  pumps     Pump[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Pump {
+  id        String     @id @default(uuid())
+  pumpId    String     @unique
+  apiKey    String     @unique
+  stationId String
+  station   Station    @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  data      PumpData[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+
+model PumpData {
+  id        String   @id @default(uuid())
+  pumpId    String
+  liters    Float
+  amount    Float
+  nozzle    Int
+  fuelType  String
+  timestamp DateTime
+  pump      Pump     @relation(fields: [pumpId], references: [pumpId], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([pumpId])
+  @@index([timestamp])
+}
