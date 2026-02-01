@@ -1,39 +1,51 @@
 import {
   IsString,
-  IsNumber,
   IsNotEmpty,
   Min,
   IsDateString,
+  IsOptional,
+  IsEnum,
+  Max,
+  IsNumber,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export enum FuelType {
+  PETROL = 'PETROL',
+  DIESEL = 'DIESEL',
+}
 
 export class CreatePumpDataDto {
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'pumpId is required' })
   pumpId: string;
 
-  @IsString()
-  stationId: string;
-
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'liters must be a number' })
+  @Min(0, { message: 'liters must be non-negative' })
+  @Max(10000, { message: 'liters cannot exceed 10000' })
   liters: number;
 
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'amount must be a number' })
+  @Min(0, { message: 'amount must be non-negative' })
+  @Max(1000000, { message: 'amount cannot exceed 1000000' })
   amount: number;
 
-  @IsNumber()
-  @Min(1)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'nozzle must be a number' })
+  @Min(1, { message: 'nozzle number must be at least 1' })
+  @Max(10, { message: 'nozzle number cannot exceed 10' })
   nozzle: number;
 
-  @IsString()
-  @IsNotEmpty()
-  fuelType: string;
+  @IsEnum(FuelType, { message: 'fuelType must be either PETROL or DIESEL' })
+  fuelType: FuelType;
 
-  @IsDateString()
-  @IsNotEmpty()
-  timestamp: string; // ISO 8601 format
+  @IsDateString({}, { message: 'timestamp must be a valid ISO 8601 date string' })
+  @IsNotEmpty({ message: 'timestamp is required' })
+  timestamp: string;
 
   @IsString()
-  apiKey: string;
+  @IsOptional()
+  stationId?: string;
 }

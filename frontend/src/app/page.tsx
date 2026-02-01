@@ -17,6 +17,7 @@ export default function Home() {
         setLoading(true);
         const data = await pumpsApi.getAll();
         setPumps(data);
+        setError(null); // Clear any previous errors
       } catch (err) {
         setError('Failed to load pumps. Make sure the backend is running.');
         console.error(err);
@@ -25,7 +26,13 @@ export default function Home() {
       }
     };  
 
+    // Fetch immediately
     fetchPumps();
+
+    // Auto-refresh every 10 seconds to get real-time updates
+    const interval = setInterval(fetchPumps, 10000);
+
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {

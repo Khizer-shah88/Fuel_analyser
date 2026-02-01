@@ -44,10 +44,82 @@ This is a production-ready NestJS backend for managing fuel pumps in real petrol
 
 ## 📡 API Endpoints
 
+### Pump Registration
+
+#### `POST /api/pumps/register`
+Register a new pump and receive an API key for authentication.
+
+**Endpoint URL:**
+```
+POST http://192.168.100.20:3000/api/pumps/register
+```
+
+**Headers:**
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "pumpId": "PUMP001",
+  "stationId": "optional-station-uuid"
+}
+```
+
+**Response (New Registration):**
+```json
+{
+  "success": true,
+  "message": "Pump registered successfully",
+  "pumpId": "PUMP001",
+  "apiKey": "a1b2c3d4e5f6...",
+  "station": {
+    "id": "uuid",
+    "name": "Main Station",
+    "location": "Downtown"
+  },
+  "registered": true
+}
+```
+
+**Response (Already Registered):**
+```json
+{
+  "success": true,
+  "message": "Pump already registered",
+  "pumpId": "PUMP001",
+  "apiKey": "a1b2c3d4e5f6...",
+  "registered": false
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid pumpId format or missing required fields
+- `404 Not Found` - Station ID not found (if provided)
+
+**Notes:**
+- `pumpId` must be unique and can only contain alphanumeric characters, dashes, and underscores
+- `stationId` is optional - pumps can be registered without a station initially
+- If the pump already exists, the existing API key is returned
+- API keys are cryptographically secure and unique per pump
+
+---
+
 ### Pump Data Submission
 
 #### `POST /api/pumps/data`
-Submit transaction data from a fuel pump.
+Submit transaction data from a fuel pump. The pump must be registered first.
+
+**Endpoint URL:**
+```
+POST http://192.168.100.20:3000/api/pumps/data
+```
+
+**Endpoint URL:**
+```
+POST http://192.168.100.20:3000/api/pumps/data
+```
 
 **Headers:**
 ```
@@ -62,10 +134,20 @@ Content-Type: application/json
   "liters": 5.23,
   "amount": 1520,
   "nozzle": 1,
-  "fuelType": "Petrol",
-  "timestamp": "2026-01-25T10:00:00Z"
+  "fuelType": "PETROL",
+  "timestamp": "2026-01-25T10:00:00Z",
+  "stationId": "optional-station-uuid"
 }
 ```
+
+**Field Validation:**
+- `pumpId` (required): Must match the pump associated with the API key
+- `liters` (required): Number between 0 and 10000
+- `amount` (required): Number between 0 and 1000000
+- `nozzle` (required): Integer between 1 and 10
+- `fuelType` (required): Must be `PETROL` or `DIESEL`
+- `timestamp` (required): Valid ISO 8601 date string, cannot be more than 5 minutes in the future
+- `stationId` (optional): If provided, must match the pump's station
 
 **Response:**
 ```json
@@ -82,9 +164,12 @@ Content-Type: application/json
 ```
 
 **Error Responses:**
-- `401 Unauthorized` - Invalid or missing API key
-- `404 Not Found` - Pump ID not found
-- `400 Bad Request` - Invalid data (negative values, etc.)
+- `401 Unauthorized` - Invalid or missing API key, or pump not registered
+- `400 Bad Request` - Invalid data format, pumpId mismatch, or validation errors:
+  - Pump ID mismatch: The API key belongs to a different pump
+  - Station ID mismatch: The provided stationId doesn't match the pump's station
+  - Invalid timestamp: Timestamp format is invalid or too far in the future
+  - Invalid values: Negative numbers, out-of-range values, etc.
 
 ---
 
@@ -253,11 +338,39 @@ Get time series data for the last N hours.
 
 ## 🔧 ESP8266 Integration Example
 
+### Step 1: Register Your Pump
+
 ```javascript
-// Example code for ESP8266 module
+// First, register your pump to get an API key
 const pumpId = "PUMP001";
-const apiKey = "your-api-key-here";
-const serverUrl = "http://your-backend.com/api/pumps/data";
+const registerUrl = "http://192.168.100.20:3000/api/pumps/register";
+
+fetch(registerUrl, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    pumpId: pumpId,
+    stationId: "optional-station-uuid" // Optional
+  })
+})
+.then(response => response.json())
+.then(data => {
+  console.log('Pump registered! API Key:', data.apiKey);
+  // Store this API key securely in your ESP8266 module
+  const apiKey = data.apiKey;
+})
+.catch(error => console.error('Registration error:', error));
+```
+
+### Step 2: Send Transaction Data
+
+```javascript
+// Use the API key received from registration
+const pumpId = "PUMP001";
+const apiKey = "your-api-key-from-registration";
+const serverUrl = "http://192.168.100.20:3000/api/pumps/data";
 
 // When transaction completes
 function sendTransactionData(liters, amount, nozzle, fuelType) {
@@ -329,6 +442,7 @@ docker run -p 3000:3000 --env-file .env fuel-pump-backend
 - Validation is enabled on all DTOs
 - Database indexes are on `pumpId` and `timestamp` for performance
 - CORS is enabled for frontend access
+
 
 
 
