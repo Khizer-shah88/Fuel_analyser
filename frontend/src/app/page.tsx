@@ -80,7 +80,7 @@ export default function Home() {
     fetchDashboardData();
 
     // Auto-refresh every 10 seconds for real-time analytics updates
-    const interval = setInterval(fetchDashboardData, 10000);
+    const interval = setInterval(fetchDashboardData, 20000);
 
     return () => clearInterval(interval);
   }, []);
