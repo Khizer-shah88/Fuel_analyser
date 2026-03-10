@@ -1,7 +1,23 @@
 import axios from 'axios';
-import type { Pump, PumpData, FlowStatistics, AmountStatistics, Distribution } from '@/types';
+import type {
+  Pump,
+  PumpData,
+  FlowStatistics,
+  AmountStatistics,
+  Distribution,
+  DashboardSummary,
+  TodayAnalytics,
+  MonthlyAnalytics,
+  ProductWiseItem,
+  HourlyAnalytics,
+  WeeklyAnalytics,
+  NozzleDashboardItem,
+} from '@/types';
 import { authStorage } from './auth';
 
+// Backend API base URL
+// Defaults to the local NestJS backend (port 3000) with global "api" prefix.
+// You can override this via NEXT_PUBLIC_API_URL for other environments.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 const api = axios.create({
@@ -56,6 +72,58 @@ export const pumpsApi = {
 
 // Analytics API
 export const analyticsApi = {
+  getDashboardSummary: async (params?: {
+    from?: string;
+    to?: string;
+    stationId?: string;
+    pumpId?: string;
+    groupBy?: 'day' | 'month';
+  }): Promise<DashboardSummary> => {
+    const response = await api.get('/analytics/dashboard', {
+      params: params || {},
+    });
+    return response.data;
+  },
+
+  getToday: async (params?: { stationId?: string; pumpId?: string }): Promise<TodayAnalytics> => {
+    const response = await api.get('/analytics/today', { params });
+    return response.data;
+  },
+
+  getMonthly: async (params?: {
+    stationId?: string;
+    pumpId?: string;
+    month?: number;
+    year?: number;
+  }): Promise<MonthlyAnalytics> => {
+    const response = await api.get('/analytics/monthly', { params });
+    return response.data;
+  },
+
+  getProductWiseToday: async (params?: {
+    stationId?: string;
+    pumpId?: string;
+  }): Promise<ProductWiseItem[]> => {
+    const response = await api.get('/analytics/product-wise', { params });
+    return response.data;
+  },
+
+  getHourlyToday: async (params?: {
+    stationId?: string;
+    pumpId?: string;
+  }): Promise<HourlyAnalytics> => {
+    const response = await api.get('/analytics/hourly', { params });
+    return response.data;
+  },
+
+  getWeekly: async (params?: {
+    stationId?: string;
+    pumpId?: string;
+  }): Promise<WeeklyAnalytics> => {
+    const response = await api.get('/analytics/weekly', { params });
+    return response.data;
+  },
+
   getLitersStatistics: async (pumpId?: string): Promise<FlowStatistics> => {
     const response = await api.get('/analytics/liters-statistics', {
       params: pumpId ? { pumpId } : {},
@@ -91,6 +159,14 @@ export const analyticsApi = {
         hours,
       },
     });
+    return response.data;
+  },
+
+  getNozzleDashboard: async (params?: {
+    stationId?: string;
+    pumpId?: string;
+  }): Promise<NozzleDashboardItem[]> => {
+    const response = await api.get('/analytics/nozzle-dashboard', { params });
     return response.data;
   },
 };

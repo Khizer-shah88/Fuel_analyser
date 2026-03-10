@@ -2,10 +2,10 @@
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { format, parseISO } from 'date-fns';
-import type { PumpData } from '@/types';
+import type { PumpData, DashboardSummaryTimeSeriesPoint } from '@/types';
 
 interface TimeSeriesChartProps {
-  data: PumpData[];
+  data: PumpData[] | DashboardSummaryTimeSeriesPoint[];
 }
 
 export default function TimeSeriesChart({ data }: TimeSeriesChartProps) {
@@ -17,13 +17,64 @@ export default function TimeSeriesChart({ data }: TimeSeriesChartProps) {
     );
   }
 
+  // Check if data is PumpData (has timestamp) or DashboardSummaryTimeSeriesPoint (has label)
+  const isPumpData = (item: any): item is PumpData => 'timestamp' in item;
+  const isDashboardPoint = (item: any): item is DashboardSummaryTimeSeriesPoint => 'label' in item;
+
   const chartData = data
-    .map((item) => ({
-      time: format(parseISO(item.timestamp), 'HH:mm'),
-      liters: item.liters,
-      amount: item.amount,
-      timestamp: item.timestamp,
-    }))
+    .map((item) => {
+      if (isPumpData(item)) {
+        // Handle PumpData format (has timestamp field)
+        try {
+          return {
+            time: format(parseISO(item.timestamp), 'HH:mm'),
+            liters: item.liters,
+            amount: item.amount,
+            timestamp: item.timestamp,
+          };
+        } catch (error) {
+          // Fallback if timestamp parsing fails
+          return {
+            time: item.timestamp,
+            liters: item.liters,
+            amount: item.amount,
+            timestamp: item.timestamp,
+          };
+        }
+      } else if (isDashboardPoint(item)) {
+        // Handle DashboardSummaryTimeSeriesPoint format (has label field)
+        // Label can be date (YYYY-MM-DD) or month (YYYY-MM)
+        try {
+          // Try to parse as date and format
+          const parsed = parseISO(item.label);
+          // If label is a full date, show date; if it's just month, show month
+          const timeLabel = item.label.length === 10 
+            ? format(parsed, 'MMM dd') // e.g., "Jan 30"
+            : format(parsed, 'MMM yyyy'); // e.g., "Jan 2026"
+          return {
+            time: timeLabel,
+            liters: item.liters,
+            amount: item.amount,
+            timestamp: item.label,
+          };
+        } catch (error) {
+          // Fallback to label as-is
+          return {
+            time: item.label,
+            liters: item.liters,
+            amount: item.amount,
+            timestamp: item.label,
+          };
+        }
+      }
+      // Fallback for unknown format
+      return {
+        time: 'Unknown',
+        liters: (item as any).liters || 0,
+        amount: (item as any).amount || 0,
+        timestamp: (item as any).timestamp || (item as any).label || '',
+      };
+    })
     .reverse(); // Show oldest to newest
 
   return (
@@ -47,7 +98,7 @@ export default function TimeSeriesChart({ data }: TimeSeriesChartProps) {
           orientation="right"
           stroke="#10b981"
           tick={{ fontSize: 12 }}
-          label={{ value: 'Amount (₹)', angle: 90, position: 'insideRight' }}
+          label={{ value: 'Amount (PKR)', angle: 90, position: 'insideRight' }}
         />
         <Tooltip
           contentStyle={{
@@ -57,7 +108,7 @@ export default function TimeSeriesChart({ data }: TimeSeriesChartProps) {
           }}
           formatter={(value: number, name: string) => {
             if (name === 'liters') return [`${value.toFixed(2)}L`, 'Liters'];
-            if (name === 'amount') return [`₹${value.toFixed(2)}`, 'Amount'];
+            if (name === 'amount') return [`PKR ${value.toFixed(2)}`, 'Amount'];
             return [value, name];
           }}
           labelFormatter={(label) => `Time: ${label}`}
@@ -81,12 +132,16 @@ export default function TimeSeriesChart({ data }: TimeSeriesChartProps) {
           strokeWidth={2}
           dot={{ r: 4 }}
           activeDot={{ r: 6 }}
-          name="Amount (₹)"
+          name="Amount (PKR)"
         />
       </LineChart>
     </ResponsiveContainer>
   );
 }
+
+
+
+
 
 
 

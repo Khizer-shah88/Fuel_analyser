@@ -28,7 +28,7 @@ export default function AmountChart({ data }: AmountChartProps) {
               border: '1px solid #e2e8f0',
               borderRadius: '8px',
             }}
-            formatter={(value: number) => [`₹${value.toFixed(2)}`, 'Amount']}
+            formatter={(value: number) => [`PKR ${value.toFixed(2)}`, 'Amount']}
           />
           <Bar dataKey="value" radius={[8, 8, 0, 0]}>
             {chartData.map((entry, index) => (
@@ -44,12 +44,16 @@ export default function AmountChart({ data }: AmountChartProps) {
         </div>
         <div>
           <p className="text-slate-600">Average</p>
-          <p className="text-xl font-bold text-primary-600">₹{data.average.toFixed(2)}</p>
+          <p className="text-xl font-bold text-primary-600">PKR {data.average.toFixed(2)}</p>
         </div>
       </div>
     </div>
   );
 }
+
+
+
+
 
 
 

@@ -33,37 +33,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('👤 Stored user exists:', !!storedUser);
 
       if (storedToken && storedUser) {
-        console.log('✅ Setting initial auth state from localStorage');
-        // Set initial state immediately to avoid flash
+        console.log('✅ Using stored auth data from localStorage');
+        // Set initial state immediately from storage - no need to verify with backend
         setToken(storedToken);
         setUser(storedUser);
-
-        try {
-          console.log('🔍 Verifying token with backend...');
-          // Verify token is still valid in background
-          const meResponse = await authApi.getMe();
-          console.log('✅ Token verified successfully:', meResponse);
-
-          // Update user data with fresh data from server
-          const freshUserData: User = {
-            userId: meResponse.userId,
-            email: meResponse.email,
-            role: meResponse.role,
-          };
-
-          // Update storage with fresh data
-          authStorage.setUser(freshUserData);
-          setUser(freshUserData);
-
-          console.log('✅ Auth state restored from storage');
-          // If successful, token is valid, keep the user logged in
-        } catch (error) {
-          console.error('❌ Token verification failed:', error);
-          // Token is invalid, clear auth
-          console.log('🧹 Clearing invalid auth data');
-          authStorage.removeToken();
-          setToken(null);
-          setUser(null);
+        console.log('✅ Auth state loaded from storage');
+        
+        // Optionally verify token in background (don't wait for it)
+        // If token is invalid, the API calls will get 401 and redirect to login
+        if (process.env.NODE_ENV === 'development') {
+          authApi.getMe()
+            .then(meResponse => {
+              console.log('✅ Token verified (background):', meResponse);
+            })
+            .catch(error => {
+              console.warn('⚠️  Token verification failed (background):', error.message);
+            });
         }
       } else {
         console.log('❌ No stored auth data found');

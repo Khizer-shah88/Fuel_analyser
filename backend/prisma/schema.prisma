@@ -16,14 +16,14 @@ model User {
 }
 
 model Station {
-  id        String   @id @default(uuid())
-  name      String
-  location  String?
-  ownerId   String
-  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  pumps     Pump[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String      @id @default(uuid())
+  name       String
+  location   String?
+  ownerId    String
+  owner      User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  pumps      Pump[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 }
 
 model Pump {
@@ -40,14 +40,22 @@ model Pump {
 model PumpData {
   id        String   @id @default(uuid())
   pumpId    String
-  liters    Float
-  amount    Float
-  nozzle    Int
-  fuelType  String
-  timestamp DateTime
+  liters    Float?
+  amount    Float?
+  nozzle    Int?
+  fuelType  String?
+  timestamp DateTime?
   pump      Pump     @relation(fields: [pumpId], references: [pumpId], onDelete: Cascade)
   createdAt DateTime @default(now())
 
+  // Single column indexes for common filters
   @@index([pumpId])
   @@index([timestamp])
+  @@index([fuelType])
+  @@index([nozzle])
+  
+  // Composite indexes for common query patterns
+  @@index([pumpId, timestamp])
+  @@index([timestamp, fuelType])
+  @@index([pumpId, fuelType])
 }

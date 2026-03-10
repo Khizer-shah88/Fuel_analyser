@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../common/prisma.service';
@@ -11,6 +12,8 @@ import { RegisterPumpDto } from './dto/register-pump.dto';
 
 @Injectable()
 export class PumpsService {
+  private readonly logger = new Logger(PumpsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async createPumpData(
@@ -61,29 +64,61 @@ export class PumpsService {
     }
 
     // Validate data ranges
-    if (createPumpDataDto.liters < 0) {
+    if (createPumpDataDto.liters !== undefined && createPumpDataDto.liters < 0) {
       throw new BadRequestException('Liters must be non-negative');
     }
 
-    if (createPumpDataDto.amount < 0) {
+    if (createPumpDataDto.amount !== undefined && createPumpDataDto.amount < 0) {
       throw new BadRequestException('Amount must be non-negative');
     }
 
-    if (createPumpDataDto.nozzle < 1 || createPumpDataDto.nozzle > 10) {
+    if (createPumpDataDto.nozzle && (createPumpDataDto.nozzle < 1 || createPumpDataDto.nozzle > 10)) {
       throw new BadRequestException('Nozzle number must be between 1 and 10');
     }
 
+    // Build data object with only defined fields
+    const dataToCreate: any = {
+      pumpId: pump.pumpId,
+      timestamp: timestamp,
+    };
+
+    // Add optional fields only if they are defined
+    if (createPumpDataDto.liters !== undefined) {
+      dataToCreate.liters = createPumpDataDto.liters;
+    }
+    if (createPumpDataDto.amount !== undefined) {
+      dataToCreate.amount = createPumpDataDto.amount;
+    }
+    if (createPumpDataDto.nozzle !== undefined) {
+      dataToCreate.nozzle = createPumpDataDto.nozzle;
+    }
+    if (createPumpDataDto.fuelType !== undefined) {
+      dataToCreate.fuelType = createPumpDataDto.fuelType;
+    }
+
     // Create pump data record
-    return this.prisma.pumpData.create({
-      data: {
-        pumpId: pump.pumpId,
-        liters: createPumpDataDto.liters,
-        amount: createPumpDataDto.amount,
-        nozzle: createPumpDataDto.nozzle,
-        fuelType: createPumpDataDto.fuelType,
-        timestamp: timestamp,
-      },
-    });
+    this.logger.log(`💾 Saving transaction to database: ${pump.pumpId}`);
+    this.logger.debug(`Transaction data: ${JSON.stringify({
+      pumpId: pump.pumpId,
+      liters: createPumpDataDto.liters,
+      amount: createPumpDataDto.amount,
+      nozzle: createPumpDataDto.nozzle,
+      fuelType: createPumpDataDto.fuelType,
+      timestamp: timestamp.toISOString(),
+    })}`);
+
+    try {
+      const result = await this.prisma.pumpData.create({
+        data: dataToCreate,
+      });
+      
+      this.logger.log(`✅ Transaction saved successfully with ID: ${result.id}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`❌ Database error while saving transaction:`, error.message);
+      this.logger.error(`Error stack:`, error.stack);
+      throw new BadRequestException(`Failed to save transaction: ${error.message}`);
+    }
   }
 
   async registerPump(registerPumpDto: RegisterPumpDto) {
@@ -223,3 +258,4 @@ export class PumpsService {
     });
   }
 }
+

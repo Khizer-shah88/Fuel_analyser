@@ -8,7 +8,6 @@ import {
 
 export class RegisterPumpDto {
   @IsString()
-  @IsNotEmpty({ message: 'pumpId is required' })
   @Length(1, 50, { message: 'pumpId must be between 1 and 50 characters' })
   @Matches(/^[A-Za-z0-9_-]+$/, {
     message:
