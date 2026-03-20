@@ -1,5 +1,5 @@
 /*
- * ESP-01 Fuel Pump Data Logger Firmware
+ * ESP-01 Fuel Pump Data Logger Firmware (Custom Backend Build)
  * =====================================
  * 
  * Hardware: ESP-01 (ESP8266)
@@ -12,12 +12,12 @@
  * Wiring for ESP-01:
  * - VCC: 3.3V (NOT 5V!)
  * - GND: Ground
- * - GPIO0: Flow sensor pulse input (pulled HIGH for normal operation)
- * - GPIO2: Status LED (active LOW)
+ * - GPIO0: Keep HIGH at boot (do not use for flow sensor input)
+ * - GPIO2: Flow sensor pulse input
  * - RX: Connect to pump controller TX (receives price updates)
  * - TX: Debug output / Programming
  * 
- * Flow Sensor: Connect pulse output to GPIO0
+ * Flow Sensor: Connect pulse output to GPIO2
  * - Typical: YF-S201 (7.5 pulses per liter)
  * - Or hall-effect sensor from pump
  * 
@@ -36,6 +36,7 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiManager.h>
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
@@ -44,9 +45,8 @@
 // CONFIGURATION - MODIFY THESE VALUES
 // ============================================
 
-// WiFi Credentials
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+// WiFi Manager captive portal settings
+const char* PORTAL_PASSWORD = "12345678";  // Min 8 chars, set "" for open AP
 
 // Backend Server Configuration
 const char* SERVER_HOST = "192.168.100.16";  // Your backend IP
@@ -61,17 +61,19 @@ const char* STATION_ID = "";               // Optional: Leave empty if not assig
 const float PULSES_PER_LITER = 7.5;        // Calibrate for your flow sensor (YF-S201 = 7.5)
 
 // Default Fuel Prices (used on first boot, then stored in EEPROM)
-const float DEFAULT_PETROL_PRICE = 290.0;
-const float DEFAULT_DIESEL_PRICE = 295.0;
+const float DEFAULT_PETROL_PRICE = 322.0;
+const float DEFAULT_DIESEL_PRICE = 395.0;
 
 // Hardware Pins (ESP-01 has limited GPIO)
-#define FLOW_SENSOR_PIN 0                   // GPIO0 - Flow sensor pulse input
-#define STATUS_LED_PIN 2                    // GPIO2 - Built-in LED (active LOW)
+#define FLOW_SENSOR_PIN_A 2                 // GPIO2 - preferred flow sensor input
+#define FLOW_SENSOR_PIN_B 0                 // GPIO0 - fallback flow sensor input
+#define STATUS_LED_ENABLED false            // Disabled to avoid pin conflict with flow inputs
 
 // Timing Configuration
 const unsigned long DEBOUNCE_DELAY = 5;           // ms - flow sensor debounce
-const unsigned long TRANSACTION_TIMEOUT = 30000;  // ms - no flow = transaction complete
+const unsigned long TRANSACTION_TIMEOUT = 5000;   // ms - no flow = transaction complete
 const unsigned long WIFI_RETRY_INTERVAL = 5000;   // ms - WiFi reconnection interval
+const unsigned long WIFI_LOSS_PORTAL_DELAY = 30000; // ms - start portal if WiFi missing this long
 const unsigned long API_RETRY_INTERVAL = 3000;    // ms - API retry interval
 const int MAX_API_RETRIES = 3;                    // Maximum API retry attempts
 
@@ -111,9 +113,42 @@ String currentFuelType = "PETROL";         // Default fuel type
 // Timing variables
 unsigned long lastWiFiCheck = 0;
 unsigned long lastActivityTime = 0;
+unsigned long wifiDisconnectedSince = 0;
+unsigned long lastPulseDebug = 0;
+unsigned long lastPulseSnapshot = 0;
 
 // Serial buffer for receiving price commands from pump controller
 String serialBuffer = "";
+
+String buildPortalSsid() {
+  String id = String(PUMP_ID);
+  id.replace(" ", "");
+  id.toUpperCase();
+  return String("FDX-PUMP-") + id;
+}
+
+void openConfigPortalNow() {
+  WiFiManager wm;
+  wm.setConfigPortalTimeout(180);
+
+  String apName = buildPortalSsid();
+  Serial.printf("Opening config portal now: %s\n", apName.c_str());
+
+  bool configured;
+  if (strlen(PORTAL_PASSWORD) >= 8) {
+    configured = wm.startConfigPortal(apName.c_str(), PORTAL_PASSWORD);
+  } else {
+    configured = wm.startConfigPortal(apName.c_str());
+  }
+
+  if (configured && WiFi.status() == WL_CONNECTED) {
+    Serial.println("Portal saved WiFi successfully.");
+    Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
+    registerPump();
+  } else {
+    Serial.println("Portal exit without WiFi connection.");
+  }
+}
 
 // ============================================
 // INTERRUPT SERVICE ROUTINE
@@ -151,9 +186,8 @@ void setup() {
   Serial.printf("Pump ID: %s\n", PUMP_ID);
   Serial.println();
 
-  pinMode(STATUS_LED_PIN, OUTPUT);
-  pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
-  digitalWrite(STATUS_LED_PIN, HIGH);
+  pinMode(FLOW_SENSOR_PIN_A, INPUT_PULLUP);
+  pinMode(FLOW_SENSOR_PIN_B, INPUT_PULLUP);
   
   EEPROM.begin(EEPROM_SIZE);
   loadApiKey();
@@ -165,7 +199,8 @@ void setup() {
     registerPump();
   }
   
-  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), flowSensorISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN_A), flowSensorISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN_B), flowSensorISR, FALLING);
   
   Serial.println("Setup complete. Monitoring fuel flow...");
   Serial.printf("Current Prices: PETROL=Rs%.0f, DIESEL=Rs%.0f\n", petrolPrice, dieselPrice);
@@ -193,12 +228,29 @@ void loop() {
     if ((millis() - lastActivityTime) > TRANSACTION_TIMEOUT) {
       completeTransaction();
     }
+
+    if (millis() - lastPulseDebug > 1000) {
+      lastPulseDebug = millis();
+      Serial.printf("Flow debug -> pulses: %lu, liters: %.2f\n", currentPulses, totalLiters);
+    }
     
     static unsigned long lastBlink = 0;
-    if (millis() - lastBlink > 500) {
-      digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+    if (STATUS_LED_ENABLED && millis() - lastBlink > 500) {
       lastBlink = millis();
     }
+  }
+
+  static unsigned long lastLineDebug = 0;
+  if (millis() - lastLineDebug > 2000) {
+    lastLineDebug = millis();
+    noInterrupts();
+    unsigned long rawPulses = pulseCount;
+    interrupts();
+    Serial.printf("Line debug -> pulses:%lu io2:%d io0:%d txActive:%d\n",
+                  rawPulses,
+                  digitalRead(FLOW_SENSOR_PIN_A),
+                  digitalRead(FLOW_SENSOR_PIN_B),
+                  transactionActive ? 1 : 0);
   }
   
   yield();
@@ -307,6 +359,18 @@ void processControllerCommand(String cmd) {
   else if (cmd == "TEST") {
     simulateTransaction(5.5, currentNozzle, currentFuelType.c_str());
   }
+  // Force open WiFi portal now: PORTAL
+  else if (cmd == "PORTAL") {
+    openConfigPortalNow();
+  }
+  // Clear saved WiFi and reboot: WIFIRESET
+  else if (cmd == "WIFIRESET") {
+    Serial.println("Clearing saved WiFi and rebooting...");
+    WiFiManager wm;
+    wm.resetSettings();
+    delay(500);
+    ESP.restart();
+  }
 }
 
 // ============================================
@@ -353,37 +417,58 @@ void loadFuelPrices() {
 // ============================================
 
 void connectToWiFi() {
-  Serial.printf("Connecting to WiFi: %s", WIFI_SSID);
-  
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-    digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+  WiFiManager wm;
+  wm.setConnectTimeout(20);
+  wm.setConfigPortalTimeout(180);
+
+  String apName = buildPortalSsid();
+  Serial.printf("Connecting with WiFiManager (AP fallback: %s)\n", apName.c_str());
+
+  bool connected;
+  if (strlen(PORTAL_PASSWORD) >= 8) {
+    connected = wm.autoConnect(apName.c_str(), PORTAL_PASSWORD);
+  } else {
+    connected = wm.autoConnect(apName.c_str());
   }
-  
+
+  if (!connected) {
+    Serial.println("WiFiManager timed out. Device will retry and reopen portal.");
+    return;
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println(" Connected!");
+    Serial.println("WiFi Connected!");
     Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
     Serial.printf("Signal Strength: %d dBm\n", WiFi.RSSI());
-    digitalWrite(STATUS_LED_PIN, HIGH);
+    wifiDisconnectedSince = 0;
   } else {
-    Serial.println(" Failed!");
-    Serial.println("Will retry in background...");
+    Serial.println("WiFi not connected. Portal will be reopened in loop.");
   }
 }
 
 void maintainWiFiConnection() {
-  if (WiFi.status() != WL_CONNECTED) {
-    if (millis() - lastWiFiCheck > WIFI_RETRY_INTERVAL) {
-      lastWiFiCheck = millis();
-      Serial.println("WiFi disconnected. Reconnecting...");
-      WiFi.reconnect();
-    }
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiDisconnectedSince = 0;
+    return;
+  }
+
+  if (wifiDisconnectedSince == 0) {
+    wifiDisconnectedSince = millis();
+    Serial.println("WiFi disconnected. Starting reconnect timer...");
+  }
+
+  if (millis() - lastWiFiCheck > WIFI_RETRY_INTERVAL) {
+    lastWiFiCheck = millis();
+    Serial.println("WiFi reconnect attempt...");
+    WiFi.reconnect();
+  }
+
+  if (millis() - wifiDisconnectedSince > WIFI_LOSS_PORTAL_DELAY) {
+    Serial.println("WiFi still unavailable. Opening config portal...");
+    openConfigPortalNow();
+
+    wifiDisconnectedSince = millis();
   }
 }
 
@@ -437,6 +522,7 @@ void registerPump() {
   
   HTTPClient http;
   String url = String("http://") + SERVER_HOST + ":" + SERVER_PORT + API_BASE_URL + "/register";
+  Serial.printf("Register URL: %s\n", url.c_str());
   
   http.begin(wifiClient, url);
   http.addHeader("Content-Type", "application/json");
@@ -450,9 +536,11 @@ void registerPump() {
   serializeJson(doc, payload);
   
   int httpCode = http.POST(payload);
+  Serial.printf("Register HTTP code: %d\n", httpCode);
   
   if (httpCode == 200 || httpCode == 201) {
     String response = http.getString();
+    Serial.printf("Register response: %s\n", response.c_str());
     StaticJsonDocument<512> responseDoc;
     if (!deserializeJson(responseDoc, response)) {
       if (responseDoc["success"].as<bool>()) {
@@ -479,6 +567,7 @@ bool sendPumpData(float liters, float amount, int nozzle, const char* fuelType) 
   
   HTTPClient http;
   String url = String("http://") + SERVER_HOST + ":" + SERVER_PORT + API_BASE_URL + "/data";
+  Serial.printf("Data URL: %s\n", url.c_str());
   
   http.begin(wifiClient, url);
   http.addHeader("Content-Type", "application/json");
@@ -505,16 +594,22 @@ bool sendPumpData(float liters, float amount, int nozzle, const char* fuelType) 
   
   while (retries < MAX_API_RETRIES && !success) {
     int httpCode = http.POST(payload);
+    Serial.printf("Data HTTP code: %d\n", httpCode);
     
     if (httpCode == 200 || httpCode == 201) {
+      String response = http.getString();
+      Serial.printf("Data response: %s\n", response.c_str());
       Serial.println("Data sent successfully!");
       success = true;
       blinkLED(2, 100);
     } else if (httpCode == 401) {
+      Serial.println("Data rejected with 401. Clearing API key and re-registering...");
       clearApiKey();
       registerPump();
       break;
     } else {
+      String response = http.getString();
+      Serial.printf("Data error response: %s\n", response.c_str());
       retries++;
       if (retries < MAX_API_RETRIES) delay(API_RETRY_INTERVAL);
     }
@@ -564,8 +659,6 @@ void completeTransaction() {
   
   bool sent = sendPumpData(finalLiters, finalAmount, currentNozzle, currentFuelType.c_str());
   if (!sent) blinkLED(10, 50);
-  
-  digitalWrite(STATUS_LED_PIN, HIGH);
 }
 
 // ============================================
@@ -573,10 +666,9 @@ void completeTransaction() {
 // ============================================
 
 void blinkLED(int times, int delayMs) {
+  if (!STATUS_LED_ENABLED) return;
   for (int i = 0; i < times; i++) {
-    digitalWrite(STATUS_LED_PIN, LOW);
     delay(delayMs);
-    digitalWrite(STATUS_LED_PIN, HIGH);
     delay(delayMs);
   }
 }

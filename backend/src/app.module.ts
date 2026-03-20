@@ -5,6 +5,8 @@ import { PumpsModule } from './pumps/pumps.module';
 import { UsersModule } from './users/users.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PrismaService } from './common/prisma.service';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -14,6 +16,7 @@ import { PrismaService } from './common/prisma.service';
     UsersModule,
     AnalyticsModule,
   ],
-  providers: [PrismaService],
+  controllers: [AppController],
+  providers: [AppService, PrismaService],
 })
 export class AppModule {}

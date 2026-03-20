@@ -36,7 +36,7 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(3000);
+  await app.listen(3000, '0.0.0.0');
   console.log(
     '🚀 Fuel Pump Management System API running on http://localhost:3000/api',
   );
